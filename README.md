@@ -46,7 +46,7 @@ whatever isn't configured (see `backend/.env.example` for exact variable names).
 
 ## 2. Run the backend
 
-```bash
+```bash 
 cd backend
 cp .env.example .env
 # edit .env and paste in at least GEMINI_API_KEY
