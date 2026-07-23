@@ -1,135 +1,299 @@
 # AI Content Studio
 
-Restructured from a single-file Gemini Canvas export into a proper
-frontend/backend project. Text, code, and image generation now go through
-**your own backend**, which never ships API keys to the browser and falls
-back across multiple providers if one is unavailable, rate-limited, or out
-of quota.
+A full-stack AI content generation platform — text, code, and image generation
+through a unified, provider-agnostic backend. Originally scaffolded as a
+single-file Gemini Canvas export, restructured into a production-shaped
+frontend/backend project with real authentication, a persistent database,
+and automatic multi-provider fallback so a single API quota limit never
+takes the whole app down.
+
+**Live app:** https://ai-content-studio-liard-xi.vercel.app
+**Backend API:** https://ai-content-studio-u4hc.onrender.com/api/health
+**Repository:** [shibambocollins/ai-content-studio](https://github.com/shibambocollins/ai-content-studio)
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Environment Variables](#environment-variables)
+- [API Reference](#api-reference)
+- [Provider Fallback Chains](#provider-fallback-chains)
+- [Database Schema](#database-schema)
+- [Deployment](#deployment)
+- [Security Notes](#security-notes)
+- [Known Limitations / Roadmap](#known-limitations--roadmap)
+- [Author](#author)
+
+---
+
+## Overview
+
+AI Content Studio lets a logged-in user generate blog posts, emails, code
+snippets, images, and engineered prompts from natural-language input. The
+project's defining design decision is that **no AI provider is a single
+point of failure**: every generation request walks a configurable chain of
+providers (e.g. Gemini → Groq → OpenRouter for text) and automatically
+moves to the next one if a provider is unconfigured, rate-limited, or down.
+
+This matters in practice — free-tier AI APIs have unpredictable quotas, and
+a student project shouldn't go offline because one vendor throttled a key.
+
+## Features
+
+- **Real authentication** — bcrypt-hashed passwords, JWT sessions, rate-limited login/register endpoints
+- **Text generation** — blog posts, emails, CVs, tweets, essays, stories, study notes, with tone/length/category controls
+- **Code generation** — generate, explain, refactor, or debug code across JS/React, Python, TypeScript, HTML/CSS, Java
+- **Image generation** — text-to-image with style presets (photorealistic, digital art, minimalist, anime)
+- **Prompt Enhancer** — rewrites a basic prompt into a detailed, structured one for better LLM output
+- **Prompt Library** — curated, copy-ready prompts across writing, marketing, programming, and image categories
+- **Dashboard** — per-user stats (words generated, images created, prompts enhanced, estimated time saved) computed from real history
+- **Smart validation** — a free local heuristic filters obviously invalid input (e.g. `"1+1"`) before ever spending an API call on a relevance check
+- **Multi-provider fallback** — separate, independently configurable chains for text and image generation
+- **Persistent Postgres database** — schema auto-applied on boot, no manual migration step
+
+## Tech Stack
+
+**Frontend**
+- React 18 + Vite
+- Tailwind CSS
+- lucide-react (icons)
+
+**Backend**
+- Node.js + Express
+- `pg` (lightweight, pure-JS Postgres driver — no native binary downloads)
+- `jsonwebtoken` + `bcryptjs` for auth
+- `express-rate-limit` for abuse protection
+
+**Infrastructure**
+- **Database:** Supabase (hosted Postgres, free tier)
+- **Backend hosting:** Render (free tier)
+- **Frontend hosting:** Vercel (free tier)
+
+**AI Providers**
+| Purpose | Primary | Fallback chain |
+|---|---|---|
+| Text | Gemini (`gemini-2.5-flash`) | Groq → OpenRouter |
+| Image | Gemini (`gemini-2.5-flash-image`, "Nano Banana") | Cloudflare Workers AI (Flux) |
+
+## Architecture
+
+```
+┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
+│  React Frontend  │  HTTPS  │  Express Backend  │  HTTPS  │   AI Providers   │
+│    (Vercel)      │────────▶│     (Render)      │────────▶│ Gemini / Groq /  │
+│                  │◀────────│                   │◀────────│ OpenRouter / CF  │
+└─────────────────┘         └────────┬──────────┘         └─────────────────┘
+                                      │
+                                      │ SQL (pg)
+                                      ▼
+                             ┌──────────────────┐
+                             │   Postgres DB     │
+                             │    (Supabase)     │
+                             └──────────────────┘
+```
+
+The frontend never talks to any AI provider directly — every request goes
+through the backend, which is the only place that holds provider API keys.
+This means keys are never exposed in browser devtools or the JS bundle.
+
+## Project Structure
 
 ```
 ai-content-studio/
-├── backend/     Express API — provider keys, auth, rate limiting, Postgres
-└── frontend/    Vite + React app — talks only to your backend, never to any AI provider directly
+├── backend/
+│   ├── src/
+│   │   ├── config/index.js        # env var loading + validation
+│   │   ├── db/
+│   │   │   ├── index.js           # pg-based data access (users, history)
+│   │   │   └── schema.sql         # auto-applied on boot
+│   │   ├── middleware/
+│   │   │   ├── auth.js            # JWT verification
+│   │   │   ├── rateLimiter.js      # per-IP limits on auth + generation
+│   │   │   └── errorHandler.js
+│   │   ├── providers/
+│   │   │   ├── index.js           # fallback-chain registries (text + image)
+│   │   │   ├── geminiProvider.js
+│   │   │   ├── openaiCompatible.js # shared client for Groq/OpenRouter
+│   │   │   └── cloudflareProvider.js
+│   │   ├── routes/
+│   │   │   ├── auth.js            # register/login
+│   │   │   └── generate.js        # text/code/image/enhance/history
+│   │   └── server.js
+│   └── package.json
+└── frontend/
+    ├── src/
+    │   ├── components/            # Layout, GeneratorLayout, shared UI
+    │   ├── context/AppContext.jsx # auth + history state
+    │   ├── lib/api.js             # fetch wrapper — talks only to backend
+    │   ├── views/                 # Dashboard, Text/Code/Image/Enhancer/Library/Settings
+    │   └── App.jsx
+    └── package.json
 ```
 
-## Why this is safer than the original Canvas file
+## Getting Started
 
-The original single-file app called `generativelanguage.googleapis.com`
-directly from the browser. That means the API key (once added) would be
-visible to anyone who opens devtools — and someone could steal it and burn
-your quota. Now:
+### Prerequisites
+- Node.js 18+
+- A free [Supabase](https://supabase.com) project (Postgres)
+- At least one AI provider key (Gemini recommended to start)
 
-- The React app only ever calls **your** backend (`/api/...`).
-- The backend holds every provider key as a server-side environment
-  variable — never sent to the browser.
-- Every generation route requires a valid login (JWT) and is rate-limited,
-  so a stranger can't hammer your keys even if they find the URL.
+### 1. Clone and set up the database
 
-## 1. Set up your database (Supabase, free, no card required)
+Create a Supabase project → Project Settings → Database → copy the
+connection string. No manual migration needed — the backend applies
+`backend/src/db/schema.sql` automatically on first boot.
 
-1. Go to https://supabase.com → New Project (pick any name/region, set a DB password and **save it**).
-2. Once it's provisioned: Project Settings → Database → **Connection string** → copy the "URI" one — it looks like:
-   `postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres`
-3. Paste the full string (with your real password swapped in) into `DATABASE_URL` in `backend/.env`.
-
-No separate migration command needed. The backend applies its schema
-(`backend/src/db/schema.sql`, plain `CREATE TABLE IF NOT EXISTS`)
-automatically on startup — the first time it connects to a fresh Supabase
-project, the `users` and `history_items` tables get created for you.
-
-(Neon or Render Postgres work identically — just swap in their connection
-string. Nothing else in the app needs to change.)
-
-## 2. Get your AI provider API keys
-
-**Text (tried in this order — first that succeeds wins):**
-- **Gemini** (primary): https://aistudio.google.com/apikey
-- **Groq** (fallback #1, free, fast, OpenAI-compatible): https://console.groq.com
-- **OpenRouter** (fallback #2, has free `:free` model variants, also OpenAI-compatible): https://openrouter.ai/keys
-
-**Image (separate, its own fallback chain):**
-- **Gemini** (primary, best quality) — same key as above, but note: Gemini's
-  image model (Nano Banana) needs **billing enabled** on the Google Cloud
-  project to get any real quota, even though you're not charged under the
-  free limits. If you don't want to link a card yet, skip straight to Cloudflare below.
-- **Cloudflare Workers AI** (fallback, genuinely free, no billing gate — Stable Diffusion/Flux models):
-  https://dash.cloudflare.com — account ID is on the Overview page sidebar or the Workers & Pages page;
-  API token via My Profile → API Tokens → Create Token → "Workers AI" template.
-
-You don't need every key to run this — Gemini text alone is enough to
-start. Everything else just gets skipped by the fallback chain until it's
-configured (see `backend/.env.example` for exact variable names).
-
-> NVIDIA NIM (build.nvidia.com) was in an earlier version of this chain but
-> is dropped here since account verification was blocking it. Adding it (or
-> any other provider) back is a config change, not new code — see
-> "Extending the provider chain" below.
-
-## 3. Run the backend
+### 2. Backend
 
 ```bash
 cd backend
 cp .env.example .env
-# edit .env: paste in DATABASE_URL and at least GEMINI_API_KEY
+# fill in DATABASE_URL and at least GEMINI_API_KEY
 npm install
 npm run dev
 ```
 
-Backend runs on `http://localhost:8787`. Check `http://localhost:8787/api/health`
-in a browser to confirm it's up and see which providers are in each chain.
+Runs on `http://localhost:8787`. Check `/api/health` to confirm it's up.
 
-## 4. Run the frontend
+### 3. Frontend
 
 ```bash
 cd frontend
-cp .env.example .env   # default already points at localhost:8787, no edit needed for local dev
+cp .env.example .env   # points at localhost:8787 by default
 npm install
 npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`. Register an account (real signup,
-bcrypt-hashed password, stored in Postgres) and start generating.
+Runs on `http://localhost:5173`.
 
-## 5. Deploying
+## Environment Variables
 
-**Frontend → Vercel** (or any static host)
-- Push this repo to GitHub.
-- In Vercel: New Project → import repo → set **Root Directory** to `frontend`.
-- Framework preset: Vite. Build command `npm run build`, output dir `dist` (Vercel detects this automatically).
-- Add an environment variable `VITE_API_URL` pointing at your deployed backend, e.g. `https://your-backend.onrender.com/api`.
+### Backend (`backend/.env`)
 
-**Backend → Render** (free tier, minimal config) — or Railway/Fly.io, same idea
-- New Web Service → connect repo → **Root Directory** `backend`.
-- Build command: `npm install`. Start command: `npm start`.
-- Add every environment variable from `backend/.env.example` in Render's dashboard (never commit `.env`), including `DATABASE_URL` from your Supabase project.
-- Set `CORS_ORIGIN` to your Vercel URL once you have it, e.g. `https://your-app.vercel.app`.
+| Variable | Required | Description |
+|---|---|---|
+| `PORT` | No (default `8787`) | Server port |
+| `NODE_ENV` | Yes in production | `development` or `production` |
+| `CORS_ORIGIN` | Yes | Comma-separated allowed origins (your frontend URL, no trailing slash) |
+| `JWT_SECRET` | Yes | Long random string signing auth tokens |
+| `DATABASE_URL` | Yes | Postgres connection string |
+| `PROVIDER_CHAIN` | No (default `gemini,groq,openrouter`) | Text provider fallback order |
+| `GEMINI_API_KEY` | For Gemini | https://aistudio.google.com/apikey |
+| `GEMINI_TEXT_MODEL` | No | Default `gemini-2.5-flash` |
+| `GEMINI_IMAGE_MODEL` | No | Default `gemini-2.5-flash-image` |
+| `GROQ_API_KEY` | For Groq | https://console.groq.com |
+| `GROQ_BASE_URL` / `GROQ_MODEL` | No | Defaults set for Llama 3.1 8B |
+| `OPENROUTER_API_KEY` | For OpenRouter | https://openrouter.ai/keys |
+| `OPENROUTER_BASE_URL` / `OPENROUTER_MODEL` | No | Defaults to a free Llama 3.1 model |
+| `IMAGE_PROVIDER_CHAIN` | No (default `gemini,cloudflare`) | Image provider fallback order |
+| `CF_ACCOUNT_ID` / `CF_API_TOKEN` | For Cloudflare | https://dash.cloudflare.com |
+| `CF_IMAGE_MODEL` | No | Default `@cf/black-forest-labs/flux-1-schnell` |
 
-Since Supabase is a separate hosted service, your data survives Render
-redeploys/restarts fine — unlike the old file-based store, there's nothing
-ephemeral about it.
+### Frontend (`frontend/.env`)
 
-## What's implemented vs. still a placeholder
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_API_URL` | Yes | Backend base URL **including `/api`**, e.g. `https://your-backend.onrender.com/api` |
+
+## API Reference
+
+All routes are prefixed with `/api`. Generation routes require
+`Authorization: Bearer <token>`.
+
+| Method | Route | Body | Description |
+|---|---|---|---|
+| GET | `/health` | — | Service status + active provider chains |
+| POST | `/auth/register` | `{ name, email, password }` | Create account, returns `{ token, user }` |
+| POST | `/auth/login` | `{ email, password }` | Returns `{ token, user }` |
+| POST | `/generate/text` | `{ prompt, category?, tone?, length? }` | Returns `{ result, provider }` |
+| POST | `/generate/code` | `{ prompt, action?, language? }` | Returns `{ result, provider }` |
+| POST | `/generate/image` | `{ prompt, style? }` | Returns `{ result (base64 data URI), provider }` |
+| POST | `/generate/enhance` | `{ prompt }` | Returns `{ result, provider }` |
+| GET | `/generate/history` | — | Returns `{ history: [...] }` for the logged-in user |
+
+## Provider Fallback Chains
+
+`backend/src/providers/index.js` holds two independent registries —
+`textProviders` and `imageProviders` — each read from its own env var
+(`PROVIDER_CHAIN`, `IMAGE_PROVIDER_CHAIN`). For each request, the chain is
+walked in order; the first configured provider that succeeds wins, and
+unconfigured or failing providers are skipped with the reason logged.
+
+Groq and OpenRouter both speak the OpenAI `/chat/completions` format, so
+they share one client (`openaiCompatible.js`) — adding another free
+OpenAI-compatible provider later is a config addition, not new code. Gemini
+and Cloudflare each have their own client since their request/response
+shapes differ.
+
+## Database Schema
+
+```sql
+users
+  id            TEXT PRIMARY KEY
+  name          TEXT NOT NULL
+  email         TEXT NOT NULL UNIQUE
+  password_hash TEXT NOT NULL
+  avatar        TEXT NOT NULL
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+
+history_items
+  id      TEXT PRIMARY KEY
+  type    TEXT NOT NULL        -- 'text' | 'code' | 'image' | 'enhance'
+  title   TEXT NOT NULL
+  words   INTEGER               -- only set for type = 'text'
+  date    TIMESTAMPTZ NOT NULL DEFAULT now()
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
+```
+
+Applied automatically via `CREATE TABLE IF NOT EXISTS` on every backend
+boot — safe to run repeatedly, no separate migration tool required.
+
+## Deployment
+
+Live architecture: **Vercel** (frontend) + **Render** (backend) +
+**Supabase** (database).
+
+**Frontend (Vercel)**
+- Root Directory: `frontend`
+- Framework: Vite (auto-detected) — Build `npm run build`, Output `dist`
+- Env: `VITE_API_URL=https://<your-render-url>/api`
+- ⚠️ Vite bakes env vars in at **build time** — always trigger a redeploy after changing `VITE_API_URL`, saving alone does nothing to a previously built bundle.
+
+**Backend (Render)**
+- Root Directory: `backend`
+- Build Command: `npm install` — Start Command: `npm start`
+- Add every variable listed in [Environment Variables](#environment-variables) above
+- `CORS_ORIGIN` must exactly match your Vercel **Domain** URL (not the per-deployment hash URL, and no trailing slash) or every browser request gets blocked by CORS
+
+**Database (Supabase)**
+- Free Postgres project, connection string → `DATABASE_URL`
+- No manual migration step — schema applies on backend boot
+
+## Security Notes
+
+- Provider API keys live only in backend environment variables — never sent to or readable from the browser.
+- Passwords are hashed with bcrypt (cost factor 10), never stored or logged in plaintext.
+- JWTs expire after 7 days; auth and generation routes are both rate-limited per IP to prevent quota abuse.
+- CORS is allow-listed to specific origins rather than left open.
+
+## Known Limitations / Roadmap
 
 | Area | Status |
 |---|---|
-| Auth (register/login, JWT, bcrypt) | ✅ Real, tested against real Postgres |
-| Database | ✅ Real Postgres (Supabase/Neon/Render), auto-applies schema on boot |
-| Text / Code generation | ✅ Real, via provider fallback chain (Gemini → Groq → OpenRouter) |
-| Image generation | ✅ Real, via its own fallback chain (Gemini → Cloudflare Workers AI) |
-| Prompt relevance validation | ✅ Real (cheap local heuristic first, API call only if needed) |
-| History + dashboard stats | ✅ Real, persisted per-user |
-| Prompt Library | ✅ Static curated prompts (no backend needed) |
-| Rate limiting | ✅ Basic per-IP limits on auth + generation routes |
-| Settings → profile editing | ⚠️ Placeholder — UI is read-only; needs a `PATCH /api/auth/me` route |
-| Voice / Music generators | ❌ Not built — the original Canvas file also only had placeholder buttons for these |
+| Settings → profile editing | Placeholder — read-only UI, needs a `PATCH /api/auth/me` route |
+| Voice / Music generators | Not built — placeholder buttons only |
+| Gemini image generation | Requires billing enabled on the Google Cloud project for real quota; Cloudflare fallback covers this when unavailable |
+| Rate limit tuning | Current limits are conservative defaults — adjust once real usage patterns are known |
 
-## Extending the provider chain
+## Author
 
-`backend/src/providers/index.js` has two separate registries —
-`textProviders` and `imageProviders` — each with its own fallback order
-read from `PROVIDER_CHAIN` / `IMAGE_PROVIDER_CHAIN`. To add a new **text**
-provider that speaks the OpenAI `/chat/completions` format (most free APIs
-do), just add a config block pointing at `chatCompletion()` — no new client
-code needed. Gemini and Cloudflare each have their own client
-(`geminiProvider.js`, `cloudflareProvider.js`) since their request/response
-shapes differ from the OpenAI format.
+**Ntsobokwane Collins Shibambo** — Final-year Diploma in ICT Application
+Development, Cape Peninsula University of Technology (CPUT). Built as part
+of ongoing full-stack project work alongside MyCapePlanner and AI Job
+Assistant.
