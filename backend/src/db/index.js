@@ -1,54 +1,65 @@
-import { Low } from 'lowdb';
-import { JSONFile } from 'lowdb/node';
+import pg from 'pg';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, '..', '..', 'data');
-const dbFile = path.join(dataDir, 'db.json');
 
-const defaultData = { users: [], history: [] };
-const adapter = new JSONFile(dbFile);
-export const db = new Low(adapter, defaultData);
-
-export async function initDb() {
-  await db.read();
-  db.data ||= defaultData;
-  await db.write();
+if (!process.env.DATABASE_URL) {
+  console.warn('[db] DATABASE_URL is not set — the server will fail as soon as it tries to query the database.');
 }
 
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Most free Postgres hosts (Supabase, Neon, Render) require SSL, and use
+  // certs that Node's default TLS trust store won't validate without this.
+  ssl: process.env.DATABASE_URL?.includes('localhost') ? false : { rejectUnauthorized: false },
+});
+
 /**
- * NOTE: This is a zero-config, file-based store — great for running locally
- * and for a demo deploy with no external services to set up. The catch: on
- * most free hosting tiers (Render, Railway, etc.) the filesystem is ephemeral,
- * so this data can be wiped on redeploy or restart. When you're ready for
- * real persistence, swap this module for Postgres/SQLite-on-a-volume/Supabase
- * — nothing outside this file needs to change since routes only import
- * `db` and the helper functions below.
+ * Applies schema.sql (idempotent CREATE TABLE IF NOT EXISTS) on startup.
+ * This is a deliberate zero-config choice over a separate migration step —
+ * fewer moving parts to forget when deploying to a new host. If this project
+ * grows real schema migrations later, swap this for a proper migration tool
+ * (node-pg-migrate, Prisma Migrate, etc.) — every other function in this
+ * file only depends on the tables existing, not on how they got created.
  */
+export async function initDb() {
+  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf-8');
+  await pool.query(schema);
+}
 
 export async function findUserByEmail(email) {
-  await db.read();
-  return db.data.users.find((u) => u.email === email) || null;
+  const { rows } = await pool.query(
+    'SELECT id, name, email, password_hash AS "passwordHash", avatar, created_at AS "createdAt" FROM users WHERE email = $1',
+    [email]
+  );
+  return rows[0] || null;
 }
 
 export async function createUser(user) {
-  await db.read();
-  db.data.users.push(user);
-  await db.write();
+  const { id, name, email, passwordHash, avatar } = user;
+  await pool.query(
+    'INSERT INTO users (id, name, email, password_hash, avatar) VALUES ($1, $2, $3, $4, $5)',
+    [id, name, email, passwordHash, avatar]
+  );
   return user;
 }
 
 export async function getHistoryForUser(userId) {
-  await db.read();
-  return db.data.history
-    .filter((h) => h.userId === userId)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  const { rows } = await pool.query(
+    'SELECT id, type, title, words, date, user_id AS "userId" FROM history_items WHERE user_id = $1 ORDER BY date DESC',
+    [userId]
+  );
+  return rows;
 }
 
 export async function addHistoryItem(item) {
-  await db.read();
-  db.data.history.push(item);
-  await db.write();
+  const { id, type, title, words = null, date, userId } = item;
+  await pool.query(
+    'INSERT INTO history_items (id, type, title, words, date, user_id) VALUES ($1, $2, $3, $4, $5, $6)',
+    [id, type, title, words, date, userId]
+  );
   return item;
 }

@@ -16,7 +16,6 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || '',
 
   providerChain: parseList(process.env.PROVIDER_CHAIN || 'gemini,groq,openrouter'),
-  imageProviderChain: parseList(process.env.IMAGE_PROVIDER_CHAIN || 'gemini,cloudflare'),
 
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || '',
@@ -35,6 +34,8 @@ export const config = {
     baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
     model: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.1-8b-instruct:free',
   },
+
+  imageProviderChain: parseList(process.env.IMAGE_PROVIDER_CHAIN || 'gemini,cloudflare'),
 
   cloudflare: {
     accountId: process.env.CF_ACCOUNT_ID || '',

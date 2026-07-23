@@ -69,10 +69,10 @@ export async function generateText({ prompt, systemInstruction }) {
 }
 
 /**
- * Image generation currently only supports Gemini, since NVIDIA's and most
- * free tiers don't offer a comparable free image-generation endpoint.
- * Structured the same way so a second image provider can be added later
- * without touching the routes/callers.
+ * Image generation has its own fallback chain, separate from text, since
+ * not every text provider can generate images. Gemini first (best quality
+ * when it's working), Cloudflare Workers AI as a genuinely free fallback
+ * with no billing gate.
  */
 const imageProviders = {
   gemini: {
