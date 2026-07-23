@@ -74,10 +74,39 @@ export async function generateText({ prompt, systemInstruction }) {
  * Structured the same way so a second image provider can be added later
  * without touching the routes/callers.
  */
+const imageProviders = {
+  gemini: {
+    isConfigured: () => Boolean(config.gemini.apiKey),
+    run: (args) => generateGeminiImage(args),
+  },
+  cloudflare: {
+    isConfigured: () => Boolean(config.cloudflare.accountId && config.cloudflare.apiToken),
+    run: (args) => generateCloudflareImage(args),
+  },
+};
+
 export async function generateImage({ prompt }) {
-  if (!config.gemini.apiKey) {
-    throw new Error('Image generation requires GEMINI_API_KEY to be configured.');
+  const chain = config.imageProviderChain.filter((name) => imageProviders[name]);
+  const attempted = [];
+  let lastError;
+
+  for (const name of chain) {
+    const provider = imageProviders[name];
+    if (!provider.isConfigured()) {
+      attempted.push(`${name} (not configured)`);
+      continue;
+    }
+    try {
+      const image = await provider.run({ prompt });
+      return { image, provider: name };
+    } catch (err) {
+      attempted.push(`${name} (error: ${err.message})`);
+      lastError = err;
+    }
   }
-  const image = await generateGeminiImage({ prompt });
-  return { image, provider: 'gemini' };
+
+  throw new Error(
+    `All image providers failed or were unconfigured. Tried: ${attempted.join(', ') || 'none'}.` +
+      (lastError ? ` Last error: ${lastError.message}` : '')
+  );
 }
