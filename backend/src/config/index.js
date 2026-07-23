@@ -16,6 +16,7 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || '',
 
   providerChain: parseList(process.env.PROVIDER_CHAIN || 'gemini,groq,openrouter'),
+  imageProviderChain: parseList(process.env.IMAGE_PROVIDER_CHAIN || 'gemini,cloudflare'),
 
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || '',
