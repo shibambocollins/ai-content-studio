@@ -1,6 +1,7 @@
 import { config } from '../config/index.js';
 import { generateGeminiText, generateGeminiImage } from './geminiProvider.js';
 import { chatCompletion } from './openaiCompatible.js';
+import { generateCloudflareImage } from './cloudflareProvider.js';
 
 /**
  * Each entry knows how to call itself, and whether it's actually usable
