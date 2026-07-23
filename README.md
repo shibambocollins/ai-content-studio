@@ -263,7 +263,7 @@ Live architecture: **Vercel** (frontend) + **Render** (backend) +
 - Root Directory: `frontend`
 - Framework: Vite (auto-detected) — Build `npm run build`, Output `dist`
 - Env: `VITE_API_URL=https://<your-render-url>/api`
-- ⚠️ Vite bakes env vars in at **build time** — always trigger a redeploy after changing `VITE_API_URL`, saving alone does nothing to a previously built bundle.
+- Vite bakes env vars in at **build time** — always trigger a redeploy after changing `VITE_API_URL`, saving alone does nothing to a previously built bundle.
 
 **Backend (Render)**
 - Root Directory: `backend`
@@ -293,7 +293,4 @@ Live architecture: **Vercel** (frontend) + **Render** (backend) +
 
 ## Author
 
-**Ntsobokwane Collins Shibambo** — Final-year Diploma in ICT Application
-Development, Cape Peninsula University of Technology (CPUT). Built as part
-of ongoing full-stack project work alongside MyCapePlanner and AI Job
-Assistant.
+**Ntsobokwane Collins Shibambo** 
