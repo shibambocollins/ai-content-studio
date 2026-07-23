@@ -34,6 +34,12 @@ export const config = {
     baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
     model: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.1-8b-instruct:free',
   },
+
+  cloudflare: {
+    accountId: process.env.CF_ACCOUNT_ID || '',
+    apiToken: process.env.CF_API_TOKEN || '',
+    imageModel: process.env.CF_IMAGE_MODEL || '@cf/black-forest-labs/flux-1-schnell',
+  },
 };
 
 // Fail fast on genuinely dangerous misconfiguration, but don't crash on
